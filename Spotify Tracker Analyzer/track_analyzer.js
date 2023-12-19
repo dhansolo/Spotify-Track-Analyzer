@@ -72,6 +72,9 @@ async function track_analyzer(accessToken) {
     let danceability_count = 0;
     let energy_count = 0;
     let positivity_count = 0;
+    let duration_count = 0;
+    let artist_count = {};
+    let genre_count = {};
     try {
         console.log("Analyzing your top 50 tracks");
         for(let track of track_details) {
@@ -85,13 +88,24 @@ async function track_analyzer(accessToken) {
                 // console.log("Danceability: " + audio_features.data.danceability);
                 // console.log("Energy: " + audio_features.data.energy);
                 // console.log("Positivity: " + audio_features.data.valence)
-                danceability_count += audio_features.data.danceability
-                energy_count += audio_features.data.energy
-                positivity_count += audio_features.data.valence
+                danceability_count += audio_features.data.danceability;
+                energy_count += audio_features.data.energy;
+                positivity_count += audio_features.data.valence;
+                duration_count += audio_features.data.duration_ms;
+
+                if(track.artist in artist_count) {
+                    artist_count[track.artist] = artist_count[track.artist] + 1;
+                } else {
+                    artist_count[track.artist] = 1;
+                }
             } catch(err) {
                 console.log(err);
             }
         }
+        let artist_values = Object.entries(artist_count);
+        artist_values.sort((a, b) => b[1] - a[1]);
+        let top_five = artist_values.slice(0, 5)
+        artist_count = Object.fromEntries(top_five);
     } catch(err) {
         console.log(err);
     }
@@ -104,5 +118,8 @@ async function track_analyzer(accessToken) {
     console.log("Danceability: " + avg_danceability);
     console.log("Energy: " + avg_energy);
     console.log("Positivity: " + avg_positivity)
+    console.log("\n");
+    console.log("Top Artists")
+    console.log(Object.keys(artist_count).toString());
 
 }
