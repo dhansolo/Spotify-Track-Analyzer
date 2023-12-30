@@ -2,10 +2,12 @@ const config = require("./config/config")
 const express = require("express");
 const axios = require("axios");
 const querystring = require("querystring");
+const SpotifyHelper = require("./helpers/spotify_helper");
 const { access } = require("fs");
 
 const app = express();
 const port = 3000;
+
 
 async function getAccessToken(code) {
     const tokenUrl = 'https://accounts.spotify.com/api/token';
@@ -45,37 +47,27 @@ app.listen(port, () => {
     console.log("\n");
 });
 
-async function get_user(accessToken) {
-    let url = config.url + "me";
-    let headers = {
-        "Authorization": `Bearer ${accessToken}`
-    }
-    return await axios.get(url, { headers });
-}
-
 async function track_analyzer(accessToken) {
-    let track_details = [];
     let seed_tracks = [];
     let seed_artists = [];
+
+    let tracks_ids = []
+
+    let danceability_count = 0;
+    let energy_count = 0;
+    let positivity_count = 0;
+    let duration_count = 0;
+
+    let avg_danceability = 0;
+    let avg_energy = 0;
+    let avg_positivity = 0;
+
     try {
-        console.log("Getting your top 50 tracks")
-        let url = config.url + "me/top/tracks?limit=50"
-        let headers = {
-            "Authorization": `Bearer ${accessToken}`
-        }
-        let tracks = await axios.get(url, { headers })
+        let tracks = await SpotifyHelper.get_top_tracks(accessToken);
 
         for(let track of tracks.data.items) {
-            // console.log(`${track.name} - ${track.artists[0].name} - ${track.album.name}`)
-            track_details.push({
-                "title": track.name,
-                "artist": track.artists[0].name,
-                "artistId": track.artists[0].id,
-                "album": track.album.name,
-                "id": track.id
-            })
-        }
-        for(let track of track_details) {
+            console.log(`${track.name} - ${track.artists[0].name} - ${track.album.name}`)
+            tracks_ids.push(track.id);
             if(seed_tracks.length < 5) {
                 seed_tracks.push(track.id);
             }
@@ -84,80 +76,61 @@ async function track_analyzer(accessToken) {
             }
         }
     } catch(err) {
-        console.log(err.response.data);
+        console.log(err.response);
     }
 
-    let danceability_count = 0;
-    let energy_count = 0;
-    let positivity_count = 0;
-    let duration_count = 0;
     try {
-        console.log("Analyzing your top 50 tracks");
-        for(let track of track_details) {
-            let url = `${config.url}audio-features/${track.id}`
-            let headers = {
-                "Authorization": `Bearer ${accessToken}`
-            }
-            try {
-                let audio_features = await axios.get(url, { headers })
-                // console.log(`${track.title} - ${track.artist} - ${track.album}`)
-                // console.log("Danceability: " + audio_features.data.danceability);
-                // console.log("Energy: " + audio_features.data.energy);
-                // console.log("Positivity: " + audio_features.data.valence)
-                danceability_count += audio_features.data.danceability;
-                energy_count += audio_features.data.energy;
-                positivity_count += audio_features.data.valence;
-                duration_count += audio_features.data.duration_ms;
-            } catch(err) {
-                console.log(err.response.data);
-            }
+        let tracks_details = await SpotifyHelper.get_tracks_details(accessToken, tracks_ids);
+        for(let track of tracks_details.data.audio_features) {
+            danceability_count += track.danceability;
+            energy_count += track.energy;
+            positivity_count += track.valence;
+            duration_count += track.duration_ms;
         }
+        avg_danceability = (danceability_count/50);
+        avg_energy = (energy_count/50);
+        avg_positivity = (positivity_count/50);
+
+        console.log("\n");
+        console.log("Your results");
+        console.log("Danceability: " + (avg_danceability * 100).toFixed(2) + "%");
+        console.log("Energy: " + (avg_energy * 100).toFixed(2) + "%");
+        console.log("Positivity: " + (avg_positivity * 100).toFixed(2) + "%")
+        console.log("\n");
+
     } catch(err) {
-        console.log(err.response.data);
+        console.log(err.response);
     }
 
-    let avg_danceability = (danceability_count/50);
-    let avg_energy = (energy_count/50);
-    let avg_positivity = (positivity_count/50);
-    console.log("\n");
-    console.log("Your results");
-    console.log("Danceability: " + avg_danceability);
-    console.log("Energy: " + avg_energy);
-    console.log("Positivity: " + avg_positivity)
-    console.log("\n");
-
+    let recs;
     try {
-        console.log("Getting Recommendations");
-        let url = config.url + `recommendations?seed_tracks=${seed_tracks}&target_daceability=${avg_danceability}&target_energy=${avg_energy}&target_valence=${avg_positivity}`
-        let headers = {
-            'Content-Type': 'application/json',
-            "Authorization": `Bearer ${accessToken}`
-        }
-        let recs = await axios.get(url, { headers })
+        recs = await SpotifyHelper.get_song_recommendations(accessToken, seed_tracks, avg_danceability, avg_energy, avg_positivity);
+    } catch(err) {
+        console.log(`There was a problem getting song recommendations: ${err.response.data}`)
+    }
 
-        let track_uris = [];
-        for(let rec of recs.data.tracks) {
-            track_uris.push(rec.uri);
+    let track_uris = [];
+    for(let rec of recs.data.tracks) {
+        track_uris.push(rec.uri);
+    }
+
+    let user = await SpotifyHelper.get_user(accessToken)
+    let user_playlists =  await SpotifyHelper.get_user_playlists(accessToken, user);
+
+    let track_analyzer_playlist = user_playlists.data.items.find(playlist => playlist.name == "Your Track Analyzer Recommendations");
+    if(!track_analyzer_playlist) {
+        try {
+            track_analyzer_playlist = await SpotifyHelper.create_playlist(accessToken, user) // axios.post(playlist_url, data, { headers });
+        } catch(err) {
+            console.log(`There was a problem creating the 'Your Track Analyzer Recommendations' playlist: ${err.response.data}`)
         }
-        console.log("Creating Playlist")
-        let user = await get_user(accessToken)
-        let playlist_url = config.url + `users/${user.data.id}/playlists`;
-        let data = {
-            "name": "Your Recommendations",
-            "description": "Playlist created by Track Analyzer",
-            "public": false
-        }
-        let new_playlist = await axios.post(playlist_url, data, { headers });
-        let playlist_update_url = config.url + `playlists/${new_playlist.data.id}/tracks`
-        let tracks_for_playlist = {
-            'uris': track_uris,
-            "position": 0
-        }
-        await axios.post(playlist_update_url, tracks_for_playlist, { headers })
-        console.log(`Your recommended songs have been added to a new playlist: ${new_playlist.data.external_urls.spotify}`)
+    }
+    try {
+        await SpotifyHelper.update_playlist(accessToken, track_analyzer_playlist, track_uris);
+        console.log(`Your recommended songs have been added to the 'Your Track Analyzer Recommendations' playlist: ${track_analyzer_playlist.href}`)
         track_uris = [];
     } catch(err) {
-        console.log(err.response.data);
+        track_uris = [];
+        console.log(`There was a problem updating the 'Your Track Analyzer Recommendations' playlist: ${err.response.data}`);
     }
-
 }
