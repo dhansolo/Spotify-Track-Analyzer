@@ -1,13 +1,15 @@
-const config = require("./config/config")
+const config = require("../config/config")
 const express = require("express");
 const axios = require("axios");
 const querystring = require("querystring");
-const SpotifyHelper = require("./helpers/spotify_helper");
+const cors = require('cors');
+const SpotifyHelper = require("../helpers/spotify_helper");
 const { access } = require("fs");
 
 const app = express();
 const port = 3000;
 
+app.use(cors());
 
 async function getAccessToken(code) {
     const tokenUrl = 'https://accounts.spotify.com/api/token';
@@ -40,6 +42,7 @@ app.get('/callback', async (req, res) => {
     const code = req.query.code;
     const accessToken = await getAccessToken(code);
     track_analyzer(accessToken);
+    res.redirect('https://www.google.com/')
 });
 
 app.listen(port, () => {
